@@ -1,0 +1,7 @@
+# Use this workspace to collaborate
+workspace:
+  id: 0d144343-8c5b-4c9b-8cd6-969fbb85a823
+
+localResources:
+  collections:
+    - ../VoiceAgent.postman_collection.json

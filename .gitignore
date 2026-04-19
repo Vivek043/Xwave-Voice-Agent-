@@ -1,0 +1,10 @@
+venv/
+voice-agent/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+*.db
+*.sqlite3
+backend/.env
+.dockerignore

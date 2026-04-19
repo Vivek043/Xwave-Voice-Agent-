@@ -1,0 +1,11 @@
+name: New Environment
+values:
+  - key: GROQ_API_KEY
+    value: ''
+    enabled: true
+  - key: Hugging_face - HF_API_KEY
+    value: ''
+    enabled: true
+  - key: LANGCHAIN_API_KEY
+    value: ''
+    enabled: true

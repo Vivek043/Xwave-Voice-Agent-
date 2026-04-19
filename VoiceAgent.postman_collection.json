@@ -1,0 +1,143 @@
+{
+  "info": {
+    "name": "Xwave Voice Agent API",
+    "description": "Complete Postman collection for testing the Voice Agent API.\n\nTest order:\n1. Health Check (verify all services)\n2. Transcribe (test STT)\n3. Analyze Sentiment (test NLP)\n4. Speak (test TTS — save response as .mp3)\n5. Chat (test the full agent)\n6. Get Conversation (inspect history)\n\nImport this file in Postman: File → Import → upload this JSON",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000" },
+    { "key": "session_id", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1. Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{base_url}}/health", "host": ["{{base_url}}"], "path": ["health"] },
+        "description": "Run this first! Verifies Ollama, Groq, HuggingFace, and LangSmith are all configured."
+      }
+    },
+    {
+      "name": "2. Transcribe Audio (Groq Whisper)",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "audio",
+              "type": "file",
+              "src": "",
+              "description": "Upload any .mp3, .wav, or .webm audio file"
+            }
+          ]
+        },
+        "url": { "raw": "{{base_url}}/voice/transcribe", "host": ["{{base_url}}"], "path": ["voice", "transcribe"] },
+        "description": "Upload an audio file and get the transcript back.\n\nTip: Record yourself on your phone, send to computer, test here.\nGroq Whisper is incredibly fast — you'll see results in <1 second."
+      }
+    },
+    {
+      "name": "3. Analyze Sentiment (HuggingFace)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"text\": \"I am extremely frustrated! This has been broken for 3 days and nobody is helping me!\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": { "raw": "{{base_url}}/sentiment/analyze", "host": ["{{base_url}}"], "path": ["sentiment", "analyze"] },
+        "description": "Test sentiment analysis with different texts.\n\nTry:\n- 'Thanks for the quick help!' → POSITIVE ~+0.99\n- 'I need to reset my password' → mild positive\n- 'This is terrible, nothing works!' → NEGATIVE ~-0.98\n\nNote: First call may be slow (~20s) as HuggingFace loads the model."
+      }
+    },
+    {
+      "name": "4. Text to Speech (Edge-TTS)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/voice/speak?text=Hello, I am Xwave, your intelligent voice agent. How can I help you today?&voice=empathetic",
+          "host": ["{{base_url}}"],
+          "path": ["voice", "speak"],
+          "query": [
+            { "key": "text", "value": "Hello, I am Xwave, your intelligent voice agent. How can I help you today?" },
+            { "key": "voice", "value": "empathetic", "description": "Options: default, male, empathetic, formal" }
+          ]
+        },
+        "description": "Get audio back! In Postman:\n1. Send the request\n2. In the response area, click 'Save Response'\n3. Save as response.mp3\n4. Play the file!\n\nTry different voices: default, male, empathetic, formal"
+      }
+    },
+    {
+      "name": "5. Chat — Start New Session",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "// Auto-save session_id from response for next requests",
+              "const json = pm.response.json();",
+              "if (json.session_id) {",
+              "  pm.collectionVariables.set('session_id', json.session_id);",
+              "  console.log('Session ID saved:', json.session_id);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"Hi, I need help resetting my password\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": { "raw": "{{base_url}}/agent/chat", "host": ["{{base_url}}"], "path": ["agent", "chat"] },
+        "description": "Start a new conversation. The session_id is auto-saved to collection variables.\n\nThen go to LangSmith (smith.langchain.com) and watch the trace appear in real time!"
+      }
+    },
+    {
+      "name": "5b. Chat — Continue Session (Negative)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"This is not working! I've tried three times and still locked out!\",\n  \"session_id\": \"{{session_id}}\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": { "raw": "{{base_url}}/agent/chat", "host": ["{{base_url}}"], "path": ["agent", "chat"] },
+        "description": "Continue the session with a frustrated message. Notice the agent's response tone shifts to be more empathetic."
+      }
+    },
+    {
+      "name": "5c. Chat — Trigger Escalation",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"This is completely unacceptable! I demand to speak to a human right now!\",\n  \"session_id\": \"{{session_id}}\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": { "raw": "{{base_url}}/agent/chat", "host": ["{{base_url}}"], "path": ["agent", "chat"] },
+        "description": "Send enough negative messages to trigger escalation. Watch the action field change to 'escalate'."
+      }
+    },
+    {
+      "name": "6. Get Conversation History",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/agent/conversation/{{session_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["agent", "conversation", "{{session_id}}"]
+        },
+        "description": "View the full conversation history stored in SQLite.\nShows every turn with sentiment scores, model used, and escalation status."
+      }
+    }
+  ]
+}
