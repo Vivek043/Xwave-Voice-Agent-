@@ -1,8 +1,8 @@
 """
-Agent Router — The Full Pipeline
+Agent Router — The Full Pipeline (v2: with RAG + Tool Calling)
 
-Endpoint:
-  POST /agent/chat → Full turn: sentiment analysis + LangGraph + response
+Endpoints:
+  POST /agent/chat → Full turn: sentiment → RAG → LangGraph → tools → response
   GET  /agent/conversation/{session_id} → View conversation history
   POST /agent/chat/voice → Audio in, audio out (full voice pipeline)
 """
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 class ChatRequest(BaseModel):
     message: str
-    session_id: str = None  # Optional — creates new session if not provided
+    session_id: str = None
 
     model_config = {
         "json_schema_extra": {
@@ -40,7 +40,7 @@ class ChatRequest(BaseModel):
                     "session_id": None
                 },
                 {
-                    "message": "This is the third time I'm calling! Nothing gets fixed!",
+                    "message": "What's the status of ticket TK-1001?",
                     "session_id": "existing-session-id"
                 }
             ]
@@ -51,19 +51,18 @@ class ChatRequest(BaseModel):
 @router.post("/chat")
 async def chat(body: ChatRequest):
     """
-    Full agent turn: sentiment → LangGraph → response.
+    Full agent turn: sentiment → RAG retrieval → LangGraph → tool calling → response.
 
-    **Postman setup:**
-    1. Method: POST
-    2. URL: http://localhost:8000/agent/chat
-    3. Body → raw → JSON
-    4. First call (no session_id): {"message": "Hi, I need help with my account"}
-    5. Copy the session_id from the response
-    6. Second call (keep session going): {"message": "...", "session_id": "copy-here"}
-    7. Send multiple negative messages to watch escalation trigger
+    New in v2:
+    - RAG: Agent searches knowledge base for relevant info before responding
+    - Tools: Agent can call tools (check_ticket, reset_password, etc.)
+    - The response includes retrieval sources and tool actions taken
 
-    **Then go to LangSmith:** smith.langchain.com → your project
-    → See the full agent trace with nodes, prompts, and token counts
+    Test in Postman:
+    1. POST http://localhost:8000/agent/chat
+    2. {"message": "What are your pricing plans?"}  → tests RAG
+    3. {"message": "Check status of TK-1001"}       → tests tool calling
+    4. {"message": "Reset my password for vivek@example.com"} → tests tool calling
     """
 
     # Create or resume session
@@ -79,7 +78,7 @@ async def chat(body: ChatRequest):
 
     # Build message history for LLM context
     history = []
-    for turn in past_turns[-6:]:  # Last 6 turns
+    for turn in past_turns[-6:]:
         history.append({"role": "user", "content": f"[Sentiment: {turn.sentiment_label}] {turn.user_transcript}"})
         history.append({"role": "assistant", "content": turn.agent_response})
 
@@ -87,7 +86,7 @@ async def chat(body: ChatRequest):
     sentiment = await analyze_sentiment(body.message)
     logger.info(f"Turn {turn_number} | Sentiment: {sentiment['label']} ({sentiment['score']:+.2f})")
 
-    # Step 2: Run LangGraph agent (LangSmith traces this automatically)
+    # Step 2: Run LangGraph agent (with RAG + tools — LangSmith traces everything)
     state = await agent_graph.ainvoke({
         "session_id": session_id,
         "user_message": body.message,
@@ -97,6 +96,16 @@ async def chat(body: ChatRequest):
         "should_escalate": False,
         "negative_turn_count": negative_turns,
         "system_prompt": "",
+        # RAG fields
+        "retrieved_context": "",
+        "retrieval_sources": [],
+        # Tool fields
+        "tool_call_raw": "",
+        "tool_name": "",
+        "tool_params": {},
+        "tool_result": {},
+        "needs_tool": False,
+        # Output fields
         "agent_response": "",
         "model_used": "",
         "action": "",
@@ -127,17 +136,17 @@ async def chat(body: ChatRequest):
         "model_used": model_used,
         "action": action,
         "negative_turns": negative_turns,
-        "tip": "Visit smith.langchain.com to see the full trace of this conversation"
+        # New v2 fields
+        "rag_sources": state.get("retrieval_sources", []),
+        "tool_used": state.get("tool_name", ""),
+        "tool_result": state.get("tool_result", {}),
+        "tip": "Visit smith.langchain.com to see the full trace with RAG + tools"
     }
 
 
 @router.get("/conversation/{session_id}")
 async def get_conversation(session_id: str):
-    """
-    View the full conversation history for a session.
-
-    Postman: GET http://localhost:8000/agent/conversation/{session_id}
-    """
+    """View the full conversation history for a session."""
     turns = get_conversation_turns_raw(session_id)
     if not turns:
         return {"session_id": session_id, "turns": [], "note": "No turns found for this session"}
@@ -166,14 +175,7 @@ async def chat_voice(
     session_id: str = Form(None),
 ):
     """
-    Full voice pipeline: Audio in → Transcript → Sentiment → Agent → Audio out.
-
-    This is the complete Xwave voice loop. Test via Postman:
-    1. POST /agent/chat/voice
-    2. Body → form-data
-    3. Key: "audio" (File) → attach a recorded .mp3/.wav
-    4. Key: "session_id" (Text) → optional, leave blank for new session
-    5. Response → save as .mp3 and play the agent's voice response!
+    Full voice pipeline: Audio in → Transcript → Sentiment → RAG → Agent → Tools → Audio out.
     """
     # Step 1: Transcribe audio
     audio_bytes = await audio.read()
@@ -181,8 +183,7 @@ async def chat_voice(
     user_text = transcription["text"]
 
     # Step 2: Run the text chat pipeline
-    from pydantic import BaseModel as BM
-    class _Req(BM):
+    class _Req(BaseModel):
         message: str
         session_id: str | None
 
@@ -200,6 +201,8 @@ async def chat_voice(
         "X-Sentiment-Score": str(result["sentiment"]["score"]),
         "X-Action": result["action"],
         "X-Transcript": user_text[:200],
+        "X-RAG-Sources": ",".join(result.get("rag_sources", [])),
+        "X-Tool-Used": result.get("tool_used", ""),
     }
 
     return Response(

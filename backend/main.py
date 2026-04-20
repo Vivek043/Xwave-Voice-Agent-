@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 
-from routers import voice, sentiment, agent, health
+from routers import voice, sentiment, agent, health, knowledge
 from services.db_service import init_db
 
 logging.basicConfig(level=logging.INFO)
@@ -35,15 +35,17 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Voice Agent API",
     description="""
-    Xwave AI Voice Agent with:
+    Xwave AI Voice Agent v2 with:
     - 🎤 Speech-to-Text via Groq Whisper
     - 🧠 LLM via Ollama (local) + Groq fallback
-    - 💬 Sentiment Analysis via HuggingFace DistilBERT
+    - 💬 Sentiment Analysis via VADER (local)
     - 🔊 Text-to-Speech via Edge-TTS
-    - 📊 Tracing via LangSmith
+    - 📚 RAG Knowledge Base via ChromaDB
+    - 🔧 Agentic Tool Calling (CRM, tickets, password reset)
+    - 📊 Full Tracing via LangSmith
     - ⚠️ Smart Escalation based on sentiment
     """,
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -63,6 +65,8 @@ app.add_middleware(
         "X-Sentiment-Score",
         "X-Action",
         "X-Transcript",
+        "X-RAG-Sources",
+        "X-Tool-Used",
     ],
 )
 
@@ -71,12 +75,14 @@ app.include_router(health.router, tags=["Health"])
 app.include_router(voice.router, prefix="/voice", tags=["Voice (STT + TTS)"])
 app.include_router(sentiment.router, prefix="/sentiment", tags=["Sentiment Analysis"])
 app.include_router(agent.router, prefix="/agent", tags=["Agent (LangGraph)"])
+app.include_router(knowledge.router, prefix="/knowledge", tags=["Knowledge Base (RAG)"])
 
 
 @app.get("/")
 async def root():
     return {
-        "message": "Voice Agent API is running 🎙️",
+        "message": "Xwave AI Agent v2 — RAG + Tools + Voice 🎙️",
         "docs": "/docs",
         "health": "/health",
+        "knowledge": "/knowledge/stats",
     }
