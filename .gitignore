@@ -8,3 +8,4 @@ __pycache__/
 *.sqlite3
 backend/.env
 .dockerignore
+chroma_db/
